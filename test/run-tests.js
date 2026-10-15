@@ -25,13 +25,13 @@ Module._load = function patched(request, parent, isMain) {
   return realLoad.call(this, request, parent, isMain);
 };
 
-const { scanMedia, kindOf } = require('../src/main/scanner');
-const { copyFiles, dateFolderName } = require('../src/main/copier');
-const { listVolumes } = require('../src/main/drives');
-const { getThumbnail } = require('../src/main/thumbnails');
-const { registerIpc } = require('../src/main/ipc');
-const { rendererConfig } = require('../src/main/config');
-const { checkCopyPreflight, isInside } = require('../src/main/preflight');
+const { scanMedia, kindOf } = require('../src/main/services/scanner');
+const { copyFiles, dateFolderName } = require('../src/main/services/copier');
+const { listVolumes } = require('../src/main/services/drives');
+const { getThumbnail } = require('../src/main/services/thumbnails');
+const { registerIpc } = require('../src/main/services/ipc');
+const { rendererConfig } = require('../src/main/services/config');
+const { checkCopyPreflight, isInside } = require('../src/main/services/preflight');
 
 let passed = 0;
 let failed = 0;

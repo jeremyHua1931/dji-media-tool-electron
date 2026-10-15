@@ -1,0 +1,29 @@
+// tsconfig.web.json —— 渲染进程（Vue3 + Vite）的 TypeScript 配置
+// ============================================================
+// 覆盖 src/renderer/src 下的源码与 preload 的 window.api 类型声明。
+// 渲染进程运行在浏览器环境，lib 含 DOM；.vue 单文件组件用 vue-tsc 检查。
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@renderer/*": ["src/renderer/src/*"]
+    }
+  },
+  "include": [
+    "src/renderer/src/**/*",
+    "src/renderer/src/**/*.vue",
+    "src/preload/*.d.ts"
+  ]
+}

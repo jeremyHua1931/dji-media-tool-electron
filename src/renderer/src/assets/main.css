@@ -1,43 +1,10 @@
-/* DJI 素材筛选复制工具 —— 结果优先的文件浏览器式界面
-   布局思路：顶栏(选项摘要+操作) / 结果主区(工具栏+素材文件夹+列表) / 底部状态栏
-   选项集中在可收起的抽屉里，不占用结果区高度。
-   配色统一走 :root 里的 CSS 变量（蓝色系），改主题只改一处即可。 */
+/* main.css —— 应用组件样式（引入 base.css 的全局基础层）
+   ============================================================
+   顶栏 / 相机提示 / 结果区 + 预览窗格 / 列表 / 筛选条 / 状态栏 / 抽屉 / 弹窗。
+   布局思路：顶栏(选项摘要+操作) / 结果主区(工具栏+素材文件夹+列表) / 底部状态栏，
+   选项集中在可收起的抽屉里，不占用结果区高度。 */
 
-/* 全局盒模型统一：所有元素的宽高都包含 padding / border，避免布局算错 */
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  /* 蓝色系配色：浅蓝底 + 白卡片 + 蓝色强调 */
-  --bg: #eef3fb;           /* 页面底色 */
-  --bg-soft: #f6f9ff;      /* 面板浅底（表头、抽屉头） */
-  --panel: #ffffff;        /* 卡片/面板底色 */
-  --panel-alt: #f3f7ff;    /* 行 hover / 列表底 */
-  --border: #ccd9ee;       /* 主边框 */
-  --border-soft: #e2eaf7;  /* 细分隔线 */
-  --accent: #1668dc;       /* 主强调色（按钮、选中态） */
-  --accent-hover: #0f56bb; /* 强调色 hover */
-  --accent-soft: #e6f0ff;  /* 强调色浅底（选中行、胶囊选中） */
-  --accent-ink: #0f4c9c;   /* 强调色文字 */
-  --text: #16233a;         /* 主文字 */
-  --muted: #7b8aa3;        /* 次要文字 */
-  --ok-bg: #e9f8f1;        /* 只读提示的浅绿底 */
-  --ok-border: #bfe9d5;    /* 只读提示边框 */
-  --ok-ink: #12694a;       /* 只读提示文字 */
-}
-
-html, body {
-  height: 100%;
-  font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", sans-serif;
-  font-size: 13px;
-  color: var(--text);
-  background: var(--bg);
-}
-body {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 12px 10px;
-  overflow: hidden;
-}
+@import './base.css';
 
 /* ---------------- 顶栏 ---------------- */
 .topbar {
@@ -67,8 +34,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
-button.ghost:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
 
 /* ---------------- 相机只读提示 ---------------- */
 .camera-notice {
@@ -219,7 +184,6 @@ button.ghost:hover:not(:disabled) { background: var(--accent-soft); color: var(-
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.label { font-weight: 600; }
 
 /* ---------------- 素材文件夹栏 ---------------- */
 .source-folder {
@@ -260,9 +224,8 @@ button.ghost:hover:not(:disabled) { background: var(--accent-soft); color: var(-
 }
 .sf-more { color: var(--muted); font-size: 12px; }
 
-/* ---------------- 列表 ---------------- */
-/* ---------------- 列表上方的筛选条 ---------------- */
-/* 结构：一行横向排布，窄窗口时才换行；每个分组都 nowrap，
+/* ---------------- 筛选条 ---------------- */
+/* 一行横向排布，窄窗口时才换行；每个分组都 nowrap，
    避免像 flex:1 的窄列那样把按钮挤成竖排 */
 .filters {
   display: flex;
@@ -328,9 +291,7 @@ button.ghost:hover:not(:disabled) { background: var(--accent-soft); color: var(-
   .chip input { position: static; opacity: 1; pointer-events: auto; margin-right: 4px; }
 }
 
-.filters input.date { flex: 0 0 118px; width: 118px; }
-.filters button { height: 26px; padding: 0 10px; font-size: 12px; }
-
+/* ---------------- 结果列表 ---------------- */
 .list-wrap { position: relative; flex: 1; min-height: 0; overflow: auto; }
 
 .detail-view { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -489,43 +450,6 @@ button.ghost:hover:not(:disabled) { background: var(--accent-soft); color: var(-
 .field-row .to { color: var(--muted); }
 .field .hint { font-size: 12px; }
 
-input[type="text"] {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
-}
-input.date { flex: 1; }
-button {
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text);
-  white-space: nowrap;
-}
-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-button:disabled { opacity: .5; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.primary:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
-label { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
-.check { display: flex; font-weight: 400; }
-
-/* 顶栏里的开关按钮（预览）显示激活态 */
-button.ghost.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-
-/* 分段按钮 */
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-.seg button { border: none; border-radius: 0; height: 26px; }
-.seg button + button { border-left: 1px solid var(--border); }
-.seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-
 /* ---------------- 弹窗（统一居中弹出） ---------------- */
 .modal-mask {
   position: fixed;
@@ -565,3 +489,9 @@ button.ghost.active { background: var(--accent-soft); color: var(--accent); font
   padding-top: 12px;
   border-top: 1px solid var(--border-soft);
 }
+
+/* 分段按钮 */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.seg button { border: none; border-radius: 0; height: 26px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }

@@ -1,0 +1,26 @@
+// tsconfig.node.json —— 主进程 + preload + 构建配置 的 TypeScript 编译/检查配置
+// ============================================================
+// electron-vite 的构建入口是 src/main/index.ts 与 src/preload/index.ts；
+// 这里用 module ESNext + moduleResolution bundler 做类型检查（实际产物由
+// electron-vite/esbuild 编译为 CJS）。typecheck:node 脚本会以 --noEmit 覆盖 composite。
+{
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],                    // 主进程使用 Node API（path/process 等）
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true
+  },
+  "include": [
+    "electron.vite.config.ts",
+    "src/main/**/*",
+    "src/preload/**/*"
+  ]
+}

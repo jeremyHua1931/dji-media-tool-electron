@@ -1,4 +1,4 @@
-// drives.js —— 跨平台的磁盘 / 相机 / 读卡器检测
+// drives.ts —— 跨平台的磁盘 / 相机 / 读卡器检测
 // ============================================================
 // Windows：通过 PowerShell CIM 获取所有盘符与类型（可移动=2）；
 // macOS  ：挂载点在 /Volumes/*；
@@ -8,22 +8,35 @@
 // 性能：Windows 枚举用异步 execFile（首次 CIM 查询可能要 1~3 秒，
 //       之前用 execFileSync 会把主进程事件循环卡住，窗口跟着假死）。
 
-'use strict';
+import { promises as fsp } from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { DCIM_FOLDER } from './config';
 
-const fs = require('fs');
-const fsp = require('fs').promises;
-const os = require('os');
-const path = require('path');
-const { execFile } = require('child_process');
-const { DCIM_FOLDER } = require('./config');
+// 统一的卷描述结构（跨平台收敛后的输出）
+export interface Volume {
+  root: string;        // 卷根路径（如 "F:\\" 或 "/Volumes/NO NAME"）
+  name: string;        // 卷名（如 "NO NAME" / 盘符）
+  removable: boolean;  // 是否可移动设备
+  hasDCIM: boolean;    // 根目录下是否存在标准 DCIM 素材文件夹
+  platform: NodeJS.Platform;
+}
+
+// Windows CIM 行结构（仅用于内部解析）
+interface DiskRow {
+  DeviceID: string;
+  DriveType: number;
+  VolumeName: string;
+}
 
 /**
  * 判断某个卷根目录下是否存在 DCIM 标准素材文件夹（异步）。
  * DCIM 是数码相机的通用素材目录约定，存在它即认为是"相机/存储卡"。
- * @param {string} root 卷根路径（如 "F:\\" 或 "/Volumes/NO NAME"）
- * @returns {Promise<boolean>} 存在返回 true；无权限 / 不存在返回 false（不抛错）
+ * @param root 卷根路径（如 "F:\\" 或 "/Volumes/NO NAME"）
+ * @returns 存在返回 true；无权限 / 不存在返回 false（不抛错）
  */
-function hasDCIM(root) {
+export function hasDCIM(root: string): Promise<boolean> {
   return fsp.access(path.join(root, DCIM_FOLDER)).then(() => true, () => false);
 }
 
@@ -32,9 +45,9 @@ function hasDCIM(root) {
  * 用 execFile 而不是 execFileSync：首次 CIM 查询可能要 1~3 秒，
  * 同步版本会卡死主进程事件循环，整个窗口跟着假死。
  * 查询失败时 resolve(null)，由调用方降级到 A-Z 盘符枚举。
- * @returns {Promise<Array|null>} [{DeviceID, DriveType, VolumeName}] 或 null
+ * @returns 磁盘行数组，或 null（查询失败）
  */
-function queryWindowsDisks() {
+function queryWindowsDisks(): Promise<DiskRow[] | null> {
   // Win32_LogicalDisk.DriveType：2=可移动 3=本地磁盘 4=网络 5=光驱
   const ps =
     'Get-CimInstance Win32_LogicalDisk | ' +
@@ -48,7 +61,7 @@ function queryWindowsDisks() {
       (err, stdout) => {
         if (err) return resolve(null); // 交给调用方降级枚举
         try {
-          const parsed = JSON.parse(String(stdout).trim());
+          const parsed = JSON.parse(String(stdout).trim()) as DiskRow | DiskRow[];
           const rows = Array.isArray(parsed) ? parsed : [parsed];
           return resolve(rows.filter((r) => r && r.DeviceID));
         } catch {
@@ -62,11 +75,11 @@ function queryWindowsDisks() {
 /**
  * 降级方案：逐个探测 A-Z 盘符是否存在（CIM 查询失败时兜底）。
  * 只报告存在性，盘类型统一记作本地磁盘（DriveType=3），可移动性不可知。
- * @returns {Promise<Array>} 按盘符字母排序的 [{DeviceID, DriveType, VolumeName}]
+ * @returns 按盘符字母排序的磁盘行数组
  */
-async function fallbackWindowsDisks() {
-  const rows = [];
-  const letters = [];
+async function fallbackWindowsDisks(): Promise<DiskRow[]> {
+  const rows: DiskRow[] = [];
+  const letters: string[] = [];
   for (let i = 65; i <= 90; i += 1) letters.push(String.fromCharCode(i));
   await Promise.all(letters.map(async (letter) => {
     const root = `${letter}:\\`;
@@ -81,9 +94,9 @@ async function fallbackWindowsDisks() {
 /**
  * 组装 Windows 卷列表（统一输出结构）。
  * 优先用 CIM 查询；失败降级 A-Z 枚举。对每个盘异步探测其根目录下是否有 DCIM。
- * @returns {Promise<Array>} [{root, name, removable, hasDCIM, platform:'win32'}]
+ * @returns 卷列表
  */
-async function listWindowsVolumes() {
+export async function listWindowsVolumes(): Promise<Volume[]> {
   let rows = await queryWindowsDisks();
   if (rows === null) rows = await fallbackWindowsDisks();
 
@@ -94,7 +107,7 @@ async function listWindowsVolumes() {
       name: r.VolumeName || r.DeviceID,
       removable: r.DriveType === 2,
       hasDCIM: await hasDCIM(root),
-      platform: 'win32',
+      platform: 'win32' as NodeJS.Platform,
     };
   }));
 }
@@ -102,13 +115,13 @@ async function listWindowsVolumes() {
 /**
  * 扫描一组挂载点基目录下的所有一级子目录（macOS / Linux 的卷发现）。
  * 每个子目录视为一个"卷"，外接挂载点默认按可移动盘处理。
- * @param {string[]} bases 基目录数组（如 ['/Volumes'] 或 Linux 的多个挂载点）
- * @returns {Promise<Array>} [{root, name, removable, hasDCIM, platform}]
+ * @param bases 基目录数组（如 ['/Volumes'] 或 Linux 的多个挂载点）
+ * @returns 卷列表
  */
-async function listMountDirs(bases) {
-  const result = [];
+async function listMountDirs(bases: string[]): Promise<Volume[]> {
+  const result: Volume[] = [];
   for (const base of bases) {
-    let entries = [];
+    let entries: import('fs').Dirent[] = [];
     try {
       entries = await fsp.readdir(base, { withFileTypes: true });
     } catch {
@@ -133,9 +146,9 @@ async function listMountDirs(bases) {
  * 枚举类 Unix 系统（macOS / Linux）的卷。
  * macOS：只扫 /Volumes；Linux：覆盖 /media/<用户>、/media、/run/media/<用户>、/run/media、/mnt
  * 等常见 U 盘 / SD 卡挂载点（各发行版约定不同，多列几个增加命中率）。
- * @returns {Promise<Array>} 卷列表（结构同 listMountDirs）
+ * @returns 卷列表
  */
-function listUnixVolumes() {
+export function listUnixVolumes(): Promise<Volume[]> {
   if (process.platform === 'darwin') {
     return listMountDirs(['/Volumes']);
   }
@@ -150,20 +163,19 @@ function listUnixVolumes() {
   ]);
 }
 
-// 列出所有卷
 /**
  * 读取测试注入的卷列表（自动化测试用）。
  * 冒烟测试通过环境变量 DJI_TEST_VOLUMES（卷数组 JSON）注入一个"假相机卷"，
  * 让「启动自动检测 → 定位素材目录 → 自动扫描」这条链路在任意机器上稳定复现。
  * 注意：注入只影响"检测 / 建议来源"，扫描与复制仍走真实文件系统，
  * 不会成为绕过只读保证的口子。
- * @returns {Array|null} 解析成功的卷数组，否则 null
+ * @returns 解析成功的卷数组，否则 null
  */
-function testVolumes() {
+function testVolumes(): Volume[] | null {
   const raw = process.env.DJI_TEST_VOLUMES;
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Volume[];
     return Array.isArray(parsed) && parsed.length ? parsed : null;
   } catch {
     return null;
@@ -173,9 +185,9 @@ function testVolumes() {
 /**
  * 列出当前系统全部卷（跨平台统一入口）。
  * 流程：先尝试测试注入 → Windows 走 CIM（降级 A-Z）→ 类 Unix 扫挂载点。
- * @returns {Promise<Array>} 统一结构的卷列表
+ * @returns 统一结构的卷列表
  */
-function listVolumes() {
+export function listVolumes(): Promise<Volume[]> {
   const injected = testVolumes();
   if (injected) return Promise.resolve(injected);
   if (process.platform === 'win32') return listWindowsVolumes();
@@ -186,9 +198,9 @@ function listVolumes() {
  * 自动检测相机 / 读卡器。
  * 优先返回含 DCIM 文件夹的卷（标准相机/存储卡特征）；
  * Windows 下若一个都没有，则把所有可移动盘一并给出（供界面手动挑选）。
- * @returns {Promise<Array>} 候选卷列表（可能为空）
+ * @returns 候选卷列表（可能为空）
  */
-async function detectCameras() {
+export async function detectCameras(): Promise<Volume[]> {
   const volumes = await listVolumes();
   const withDCIM = volumes.filter((v) => v.hasDCIM);
   if (withDCIM.length > 0) return withDCIM;
@@ -209,10 +221,10 @@ const MEDIA_EXTS = new Set([
 
 /**
  * 判断文件名是否为媒体文件（按扩展名，大小写不敏感）。
- * @param {string} name 文件名
- * @returns {boolean} true 表示扩展名命中照片/视频白名单
+ * @param name 文件名
+ * @returns true 表示扩展名命中照片/视频白名单
  */
-function isMediaName(name) {
+function isMediaName(name: string): boolean {
   const dot = name.lastIndexOf('.');
   if (dot < 0) return false;
   return MEDIA_EXTS.has(name.slice(dot).toLowerCase());
@@ -222,16 +234,16 @@ function isMediaName(name) {
  * 递归统计目录树内的媒体文件数量（用于"哪个 DCIM 子目录素材最多"的探测）。
  * 用显式栈 + withFileTypes 迭代，避免递归爆栈；只数到 limit 即提前返回。
  * 只做只读探测，不做任何写入。
- * @param {string} dir   起始目录
- * @param {number} limit 计数上限（达到即返回，保护大存储卡上的性能）
- * @returns {Promise<number>} 媒体文件数量
+ * @param dir 起始目录
+ * @param limit 计数上限（达到即返回，保护大存储卡上的性能）
+ * @returns 媒体文件数量
  */
-async function countMediaIn(dir, limit) {
+async function countMediaIn(dir: string, limit: number): Promise<number> {
   let total = 0;
   const stack = [dir];
   while (stack.length) {
-    const cur = stack.pop();
-    let entries;
+    const cur = stack.pop()!;
+    let entries: import('fs').Dirent[];
     try {
       entries = await fsp.readdir(cur, { withFileTypes: true });
     } catch {
@@ -254,19 +266,28 @@ async function countMediaIn(dir, limit) {
 // 只用于探测的计数上限（不改变实际扫描结果，实际扫描仍按时间/类型过滤）
 const PROBE_LIMIT = 200;
 
+// 建议素材来源的返回结构
+export interface SuggestedRoot {
+  root: string;                  // 建议的素材根（优先为素材最多的 DCIM 子文件夹）
+  volume: string;                // 所属卷根
+  name: string;                  // 卷名
+  dcim: string;                  // DCIM 目录路径
+  fileCount: number;             // 探测到的素材数
+  candidates: { dir: string; count: number }[]; // DCIM 各子目录素材统计
+}
+
 /**
  * 给出建议的素材来源路径
- * @returns {Promise<null | {root, volume, name, dcim, fileCount, candidates}>}
- *   root 优先取「素材最多的 DCIM 子文件夹」（如 F:\DCIM\DJI_001），
- *   子文件夹都没素材时退回 DCIM 本身。
+ * @returns root 优先取「素材最多的 DCIM 子文件夹」（如 F:\DCIM\DJI_001），
+ *   子文件夹都没素材时退回 DCIM 本身；没有相机卷时返回 null。
  */
-async function suggestMediaRoot() {
+export async function suggestMediaRoot(): Promise<SuggestedRoot | null> {
   const cameras = await detectCameras();
   if (!cameras.length) return null;
 
   for (const vol of cameras) {
     const dcim = path.join(vol.root, DCIM_FOLDER);
-    let subs = [];
+    let subs: string[] = [];
     try {
       const entries = await fsp.readdir(dcim, { withFileTypes: true });
       subs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name);
@@ -309,9 +330,3 @@ async function suggestMediaRoot() {
   }
   return null;
 }
-
-module.exports = {
-  listVolumes, detectCameras, hasDCIM, suggestMediaRoot,
-  // 也导出底层实现：测试里替换它们才能真正"假装某个盘是相机"
-  listWindowsVolumes, listUnixVolumes,
-};

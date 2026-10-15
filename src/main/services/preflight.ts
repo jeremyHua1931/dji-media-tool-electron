@@ -1,4 +1,4 @@
-// preflight.js —— 复制前的安全检查（防呆 + 空间 + 相机只读保证）
+// preflight.ts —— 复制前的安全检查（防呆 + 空间 + 相机只读保证）
 // ============================================================
 // 本工具的第一原则是「只读相机、绝不动相机内部存储」，所以真正开始写盘之前
 // 必须先过三道关，任何一道不过就根本不进入复制流程：
@@ -12,42 +12,40 @@
 // 这里只做判断，不做任何写操作；错误用「可读文案 + code」返回，
 // 界面直接展示文案，测试可以断言 code。
 
-'use strict';
-
-const fs = require('fs');
-const fsp = require('fs').promises;
-const path = require('path');
+import fs from 'fs';
+import { promises as fsp } from 'fs';
+import path from 'path';
 
 // 空间安全余量：目标盘的 1% 或 64MB，取较大者
-const SPACE_HEADROOM_MIN = 64 * 1024 * 1024;
-const SPACE_HEADROOM_RATIO = 0.01;
+export const SPACE_HEADROOM_MIN = 64 * 1024 * 1024;
+export const SPACE_HEADROOM_RATIO = 0.01;
 
 /**
  * 路径规范化：转绝对路径并去掉末尾分隔符，用于统一比较口径。
  * 例如 "F:\\DCIM\\" 与 "F:\\DCIM" 视为同一路径。
- * @param {*} p 原始路径（非字符串按空串处理）
- * @returns {string} 规范化后的绝对路径
+ * @param p 原始路径（非字符串按空串处理）
+ * @returns 规范化后的绝对路径
  */
-function normalize(p) {
+export function normalize(p: string): string {
   return path.resolve(String(p || '')).replace(/[\\/]+$/, '');
 }
 
 /**
  * 当前是否 Windows 平台（路径比较等逻辑按平台区分）。
- * @returns {boolean} win32 为 true
+ * @returns win32 为 true
  */
-function isWindows() {
+export function isWindows(): boolean {
   return process.platform === 'win32';
 }
 
 /**
  * 路径相等判断（Windows 忽略大小写；类 Unix 严格区分）。
  * 规范化后再比较，排除盘符写法、末尾斜杠等差异。
- * @param {string} a 路径 A
- * @param {string} b 路径 B
- * @returns {boolean} 是否指向同一路径
+ * @param a 路径 A
+ * @param b 路径 B
+ * @returns 是否指向同一路径
  */
-function samePath(a, b) {
+export function samePath(a: string, b: string): boolean {
   const na = normalize(a);
   const nb = normalize(b);
   return isWindows() ? na.toLowerCase() === nb.toLowerCase() : na === nb;
@@ -56,11 +54,11 @@ function samePath(a, b) {
 /**
  * 判断 child 是否位于 parent 目录内部（含相等）。
  * 用于「目标不能落在源目录内」的自复制递归防护。
- * @param {string} child  待判断的子路径
- * @param {string} parent 父目录
- * @returns {boolean} child 在 parent 内部（或相等）为 true
+ * @param child 待判断的子路径
+ * @param parent 父目录
+ * @returns child 在 parent 内部（或相等）为 true
  */
-function isInside(child, parent) {
+export function isInside(child: string, parent: string): boolean {
   const rel = path.relative(normalize(parent), normalize(child));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
@@ -70,38 +68,50 @@ function isInside(child, parent) {
  * Windows：用 path.parse 取盘符根（如 "F:\\"）；
  * 类 Unix：从目标逐级向上找第一个满足「已存在目录且位于挂载点根模式」的祖先，
  * 视作挂载点近似值（无法精确拿到挂载表时的合理简化）。
- * @param {string} target 目标路径
- * @returns {Promise<string|null>} 卷根路径；Windows 解析失败返回 null
+ * @param target 目标路径
+ * @returns 卷根路径；Windows 解析失败返回 null
  */
-async function volumeRoot(target) {
+export async function volumeRoot(target: string): Promise<string | null> {
   if (isWindows()) {
     const root = path.parse(path.resolve(target)).root; // "F:\"
     return root || null;
   }
   // 类 Unix：找最长的已存在祖先目录，视作挂载点近似值
   let cur = path.resolve(target);
-  const stack = [];
   while (cur && cur !== path.dirname(cur)) {
     try {
       const st = await fsp.stat(cur);
       if (st.isDirectory() && (cur === '/' || /^\/(Volumes|media|mnt|run)\//.test(cur))) {
         return cur;
       }
-      stack.push(cur);
     } catch { /* 不存在，继续往上 */ }
     cur = path.dirname(cur);
   }
   return '/';
 }
 
+// 空间查询结果
+export interface SpaceInfo {
+  dir: string;
+  free: number;
+  total: number;
+}
+
+// statfs 返回结构（不同 Node 版本字段类型不同，这里按 number 收敛）
+interface StatFsLike {
+  bavail: number;
+  bsize: number;
+  blocks: number;
+}
+
 /**
  * 查询目标路径所在卷的剩余空间（字节）。
  * 目标目录可能尚未创建，会逐级向上找到第一个已存在的目录再 statfs。
  * Node < 18.15 没有 fsp.statfs，或查询失败时返回 null（界面只提示"空间未知"，不阻断复制）。
- * @param {string} target 目标路径
- * @returns {Promise<{dir:string, free:number, total:number}|null>}
+ * @param target 目标路径
+ * @returns 空间信息，或 null
  */
-async function freeSpace(target) {
+export async function freeSpace(target: string): Promise<SpaceInfo | null> {
   let dir = normalize(target);
   // 目标可能还没建，逐级往上找已存在的目录
   while (dir && !fs.existsSync(dir)) {
@@ -109,9 +119,10 @@ async function freeSpace(target) {
     if (parent === dir) break;
     dir = parent;
   }
-  if (typeof fsp.statfs !== 'function') return null; // Node < 18.15
+  const statfs = (fsp as unknown as { statfs?: (d: string) => Promise<StatFsLike> }).statfs;
+  if (typeof statfs !== 'function') return null; // Node < 18.15
   try {
-    const st = await fsp.statfs(dir);
+    const st = await statfs(dir);
     return {
       dir,
       free: Number(st.bavail) * Number(st.bsize),
@@ -122,13 +133,32 @@ async function freeSpace(target) {
   }
 }
 
+// 复制前检查入参
+export interface PreflightInput {
+  dest?: string;
+  sourceRoot?: string;
+  totalBytes?: number;
+  fileCount?: number;
+}
+
+// 复制前检查出参（ok=false 时带 code/message，ok=true 时带空间/体积信息）
+export interface PreflightOutput {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  free?: number | null;
+  need?: number;
+  volume?: string | null;
+  fileCount?: number;
+  totalBytes?: number;
+}
+
 /**
  * 复制前检查
- * @param {object} p { dest, sourceRoot, totalBytes, fileCount }
- * @returns {Promise<{ok:boolean, code?:string, message?:string,
- *                    free?:number, need?:number, volume?:string}>}
+ * @param p { dest, sourceRoot, totalBytes, fileCount }
+ * @returns 通过 ok=true；未通过 ok=false 且带 code / message
  */
-async function checkCopyPreflight(p) {
+export async function checkCopyPreflight(p: PreflightInput): Promise<PreflightOutput> {
   const { dest, sourceRoot, totalBytes = 0, fileCount = 0 } = p || {};
 
   if (!dest || !normalize(dest)) {
@@ -165,7 +195,7 @@ async function checkCopyPreflight(p) {
     + Math.max(SPACE_HEADROOM_MIN, Math.ceil(totalBytes * SPACE_HEADROOM_RATIO));
   const space = await freeSpace(dest);
   if (space && space.free < need) {
-    const mb = (n) => `${(n / 1024 / 1024).toFixed(0)} MB`;
+    const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(0)} MB`;
     return {
       ok: false,
       code: 'NOT_ENOUGH_SPACE',
@@ -185,9 +215,3 @@ async function checkCopyPreflight(p) {
     totalBytes,
   };
 }
-
-module.exports = {
-  checkCopyPreflight, freeSpace, volumeRoot,
-  samePath, isInside, normalize,
-  SPACE_HEADROOM_MIN, SPACE_HEADROOM_RATIO,
-};

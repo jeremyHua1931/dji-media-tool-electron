@@ -1,4 +1,4 @@
-// copier.js —— 批量复制（跨平台）
+// copier.ts —— 批量复制（跨平台）
 // ============================================================
 // 逐文件流式复制，支持：
 //   - 平铺 / 按拍摄日期建子文件夹（如 2026-10-14/）
@@ -17,13 +17,12 @@
 //      「跳过」策略时会被误判为已复制成功。
 //   4. 只统计真实传输的字节，不做二次累加。
 
-'use strict';
-
-const fs = require('fs');
-const fsp = require('fs').promises;
-const path = require('path');
-const { pipeline } = require('stream');
-const { COPY_CHUNK_SIZE } = require('./config');
+import fs from 'fs';
+import { promises as fsp } from 'fs';
+import path from 'path';
+import { pipeline } from 'stream';
+import { COPY_CHUNK_SIZE } from './config';
+import type { MediaFile } from './scanner';
 
 const CANCELLED = '__CANCELLED__';
 const MAX_RENAME_TRIES = 9999;
@@ -31,10 +30,10 @@ const MAX_RENAME_TRIES = 9999;
 /**
  * 把 Date 转成本地时间格式的目录名（如 2026-10-14）。
  * 本地时间与界面展示的拍摄时间一致，避免时区错位导致"日期文件夹"和列表显示对不上。
- * @param {Date} date 要格式化的时间
- * @returns {string} "YYYY-MM-DD"
+ * @param date 要格式化的时间
+ * @returns "YYYY-MM-DD"
  */
-function dateFolderName(date) {
+export function dateFolderName(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
@@ -44,15 +43,23 @@ function dateFolderName(date) {
 /**
  * 生成"自动改名"的第 i 个候选路径：name.jpg -> name (1).jpg。
  * 只拼字符串、不做任何文件操作；撞名由调用方用独占创建去探测。
- * @param {string} targetPath 期望的目标路径
- * @param {number} i          第几个候选（从 1 开始）
- * @returns {string} 候选路径
+ * @param targetPath 期望的目标路径
+ * @param i 第几个候选（从 1 开始）
+ * @returns 候选路径
  */
-function renameCandidate(targetPath, i) {
+export function renameCandidate(targetPath: string, i: number): string {
   const dir = path.dirname(targetPath);
   const ext = path.extname(targetPath);
   const base = path.basename(targetPath, ext);
   return path.join(dir, `${base} (${i})${ext}`);
+}
+
+// 流水线写入选项
+interface PipelineWriteOptions {
+  onBytes?: (n: number) => void;
+  isCancelled?: () => boolean;
+  onCreated?: (target: string) => void;
+  exclusive?: boolean;
 }
 
 /**
@@ -62,26 +69,26 @@ function renameCandidate(targetPath, i) {
  * 'open' 挂载存在时序竞态（首个数据块可能早于 'open' 到达而被丢弃，写出 0 字节文件）。
  * 进度由读流的 'data' 事件累计（只统计真实传输的字节，不做二次累加）；
  * 取消时 destroy 读流，触发 pipeline 的 PREMATURE_CLOSE，由外层统一判定。
- * @param {string} src 源文件路径
- * @param {string} dst 目标文件路径
- * @param {object} opt { onBytes, isCancelled, onCreated, exclusive }
- * @returns {Promise<string>} 写入完成的目标路径
+ * @param src 源文件路径
+ * @param dst 目标文件路径
+ * @param opt { onBytes, isCancelled, onCreated, exclusive }
+ * @returns 写入完成的目标路径
  */
-function pipelineWrite(src, dst, opt) {
+function pipelineWrite(src: string, dst: string, opt: PipelineWriteOptions = {}): Promise<string> {
   const {
     onBytes = () => {},
     isCancelled = () => false,
     onCreated = () => {},
     exclusive = true,
-  } = opt || {};
+  } = opt;
 
   return new Promise((resolve, reject) => {
-    let finalTarget = null;
+    let finalTarget: string | null = null;
     fs.open(dst, exclusive ? 'wx' : 'w', (openErr, fd) => {
       if (openErr) return reject(openErr);
 
-      let rs;
-      let ws;
+      let rs: fs.ReadStream | null = null;
+      let ws: fs.WriteStream | null = null;
       try {
         rs = fs.createReadStream(src, { highWaterMark: COPY_CHUNK_SIZE });
         ws = fs.createWriteStream(dst, { fd });
@@ -94,39 +101,52 @@ function pipelineWrite(src, dst, opt) {
       finalTarget = dst;
       onCreated(finalTarget);
 
-      rs.on('data', (chunk) => {
+      rs.on('data', (chunk: Buffer) => {
         if (isCancelled()) {
-          rs.destroy(); // 触发 pipeline 的 PREMATURE_CLOSE，由外层判定为取消
+          rs!.destroy(); // 触发 pipeline 的 PREMATURE_CLOSE，由外层判定为取消
           return;
         }
         onBytes(chunk.length);
       });
 
-      pipeline(rs, ws, (err) => (err ? reject(err) : resolve(finalTarget)));
+      pipeline(rs, ws, (err) => (err ? reject(err) : resolve(finalTarget as string)));
     });
   });
 }
 
+// 单文件复制结果
+interface CopyOneResult {
+  target: string;
+  renamed: boolean; // 是否因撞名换了新文件名
+}
+
+// 单文件复制选项
+interface CopyOneOptions {
+  onBytes?: (n: number) => void;
+  isCancelled?: () => boolean;
+  onCollision?: 'overwrite' | 'rename';
+}
+
 /**
  * 单个文件流式复制（带进度、取消、原子创建与失败清理）
- * @param {string} src
- * @param {string} dst     期望的目标路径
- * @param {object} opt     { onBytes, isCancelled, onCollision }
- * @returns {Promise<{target:string, renamed:boolean}>}
+ * @param src 源文件路径
+ * @param dst 期望的目标路径
+ * @param opt { onBytes, isCancelled, onCollision }
+ * @returns {target, renamed}
  */
-function copyOne(src, dst, opt) {
+function copyOne(src: string, dst: string, opt: CopyOneOptions = {}): Promise<CopyOneResult> {
   const {
     onBytes = () => {},
     isCancelled = () => false,
     onCollision = 'overwrite', // 'overwrite' | 'rename'
-  } = opt || {};
+  } = opt;
   // 只有「自动改名」才需要独占创建；覆盖策略本来就允许截断已有文件
   const exclusive = onCollision === 'rename';
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let created = false;   // 目标文件是否已真的创建（决定失败时要不要清理）
-    let finalTarget = null;
+    let finalTarget: string | null = null;
     let attempt = 0;
 
     // 只清理真正由本次复制创建、且是残缺的那些文件
@@ -135,7 +155,7 @@ function copyOne(src, dst, opt) {
       try { fs.unlinkSync(finalTarget); } catch { /* 已不存在，忽略 */ }
     };
 
-    const fail = (err) => {
+    const fail = (err: Error) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -183,30 +203,52 @@ function copyOne(src, dst, opt) {
   });
 }
 
+// 复制汇总结构
+export interface CopySummary {
+  copied: number;                 // 成功写入数
+  skipped: number;                // 撞名跳过
+  alreadyExists: number;          // 增量模式：目标已有同名同大小，直接判定已复制过
+  renamed: number;                // 自动改名数
+  verified: number;               // 校验通过数
+  verifyFailed: { name: string; expected: number; actual: number }[];
+  failed: { name: string; error: string }[];
+  cancelled: boolean;
+  bytesCopied: number;
+}
+
+// 批量复制选项
+export interface CopyOptions {
+  byDate?: boolean;
+  onConflict?: 'skip' | 'overwrite' | 'rename';
+  onlyNew?: boolean;   // 只复制目标里没有的（增量：按 同名+同大小 判断）
+  verify?: boolean;    // 复制后按大小复核一遍，防写入中断/空间不足导致的损坏
+  onBeforeVerify?: (target: string, f: MediaFile) => Promise<void> | void; // 仅供测试注入
+  progress?: (info: { doneBytes: number; totalBytes: number; idx: number; total: number; name: string }) => void;
+  isCancelled?: () => boolean;
+}
+
 /**
  * 批量复制
- * @param {Array} files  MediaFile 列表
- * @param {string} dest  目标根目录
- * @param {object} opt
- *   byDate{bool} onConflict{'skip'|'overwrite'|'rename'}
- *   progress(info){}  isCancelled(){}
- * @returns {Promise<object>} 汇总
+ * @param files MediaFile 列表
+ * @param dest 目标根目录
+ * @param opt { byDate, onConflict, onlyNew, verify, onBeforeVerify, progress, isCancelled }
+ * @returns 汇总
  */
-async function copyFiles(files, dest, opt) {
+export async function copyFiles(files: MediaFile[], dest: string, opt: CopyOptions = {}): Promise<CopySummary> {
   const {
     byDate = false,
     onConflict = 'skip',
     onlyNew = false,   // 只复制目标里没有的（增量：按 同名+同大小 判断）
     verify = true,     // 复制后按大小复核一遍，防写入中断/空间不足导致的损坏
-    onBeforeVerify = null, // 仅供测试注入：在写完后、校验前动手脚
+    onBeforeVerify = null,
     progress = () => {},
     isCancelled = () => false,
-  } = opt || {};
+  } = opt;
 
-  const summary = {
+  const summary: CopySummary = {
     copied: 0,
-    skipped: 0,        // 撞名跳过
-    alreadyExists: 0,  // 增量模式：目标已有同名同大小，直接判定已复制过
+    skipped: 0,
+    alreadyExists: 0,
     renamed: 0,
     verified: 0,
     verifyFailed: [],
@@ -225,7 +267,7 @@ async function copyFiles(files, dest, opt) {
       break;
     }
     idx += 1;
-    const report = (name) => progress({
+    const report = (name: string) => progress({
       doneBytes: Math.min(doneBytes, totalBytes),
       totalBytes,
       idx,
@@ -263,7 +305,8 @@ async function copyFiles(files, dest, opt) {
       report(f.name);
       const res = await copyOne(f.path, target, {
         isCancelled,
-        onCollision: onConflict, // 'overwrite' 撞名直接报错；'rename' 换编号重试
+        // 'skip' 已在上面提前返回，这里只剩 'overwrite'/'rename'
+        onCollision: onConflict === 'skip' ? 'overwrite' : onConflict,
         onBytes: (n) => {
           doneBytes += n;
           report(f.name);
@@ -303,11 +346,12 @@ async function copyFiles(files, dest, opt) {
       summary.bytesCopied += st.size;
       if (res.renamed) summary.renamed += 1;
     } catch (err) {
-      if (err && err.message === CANCELLED) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === CANCELLED) {
         summary.cancelled = true;
         break;
       }
-      summary.failed.push({ name: f.name, error: String((err && err.message) || err) });
+      summary.failed.push({ name: f.name, error: message });
     }
   }
 
@@ -317,15 +361,13 @@ async function copyFiles(files, dest, opt) {
 /**
  * 读取文件 stat，失败返回 null（不抛错）。
  * 用于增量判断与复制后校验等"可能不存在"的查询场景。
- * @param {string} p 路径
- * @returns {Promise<import('fs').Stats|null>}
+ * @param p 路径
+ * @returns 文件状态，或 null
  */
-async function statOrNull(p) {
+async function statOrNull(p: string): Promise<import('fs').Stats | null> {
   try {
     return await fsp.stat(p);
   } catch {
     return null;
   }
 }
-
-module.exports = { copyFiles, dateFolderName, renameCandidate };

@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
 const { app, BrowserWindow } = require('electron');
-const { registerIpc } = require('../src/main/ipc');
+const { registerIpc } = require('../src/main/services/ipc');
 
 // ---- 造几张真实渐变 PNG，让缩略图与预览窗格有内容 ----
 // 手写 PNG 编码（含 CRC），不依赖任何图片库

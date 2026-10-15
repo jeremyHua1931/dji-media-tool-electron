@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
 const { app, BrowserWindow } = require('electron');
-const { registerIpc } = require('../src/main/ipc');
+const { registerIpc } = require('../src/main/services/ipc');
 
 // ---- 造一张真实 PNG（32x32 纯色），用于验证缩略图整条链路 ----
 // 手写 PNG 编码（含 CRC），不依赖任何图片库：测试环境零第三方依赖

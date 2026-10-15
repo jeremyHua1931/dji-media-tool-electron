@@ -1,0 +1,85 @@
+/* base.css —— 全局基础层（重置 / 设计变量 / 布局 / 通用控件）
+   ============================================================
+   与 main.css 分离：base.css 只放不依赖具体组件的全局规则；
+   组件专属样式全部在 main.css。改主题（配色）只需动 :root 一处。 */
+
+/* 全局盒模型统一：所有元素的宽高都包含 padding / border，避免布局算错 */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* 蓝色系配色：浅蓝底 + 白卡片 + 蓝色强调 */
+  --bg: #eef3fb;           /* 页面底色 */
+  --bg-soft: #f6f9ff;      /* 面板浅底（表头、抽屉头） */
+  --panel: #ffffff;        /* 卡片/面板底色 */
+  --panel-alt: #f3f7ff;    /* 行 hover / 列表底 */
+  --border: #ccd9ee;       /* 主边框 */
+  --border-soft: #e2eaf7;  /* 细分隔线 */
+  --accent: #1668dc;       /* 主强调色（按钮、选中态） */
+  --accent-hover: #0f56bb; /* 强调色 hover */
+  --accent-soft: #e6f0ff;  /* 强调色浅底（选中行、胶囊选中） */
+  --accent-ink: #0f4c9c;   /* 强调色文字 */
+  --text: #16233a;         /* 主文字 */
+  --muted: #7b8aa3;        /* 次要文字 */
+  --ok-bg: #e9f8f1;        /* 只读提示的浅绿底 */
+  --ok-border: #bfe9d5;    /* 只读提示边框 */
+  --ok-ink: #12694a;       /* 只读提示文字 */
+}
+
+html, body {
+  height: 100%;
+  font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+body {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px 10px;
+  overflow: hidden;
+}
+
+/* Vue 挂载点：占满 body 剩余空间，作为整页 flex 容器 */
+#app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------------- 通用控件 ---------------- */
+button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
+/* 顶栏/筛选条里的次按钮：无边框、默认弱化，hover 才亮起来 */
+button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+button.ghost:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+/* 顶栏里的开关按钮（预览）显示激活态 */
+button.ghost.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+input.date { flex: 1; }
+
+label { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+.check { display: flex; font-weight: 400; }
+.label { font-weight: 600; }
