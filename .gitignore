@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+
+# 打包产物（electron-builder 输出到 release/）
+release/
+dist/
+
+# 测试产物
+test/smoke-result.json
+test/shots/
+
+# 日志
+*.log
+npm-debug.log*
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.exe

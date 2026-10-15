@@ -1,0 +1,67 @@
+{
+  "name": "dji-media-tool",
+  "version": "1.0.0",
+  "description": "DJI Pocket 素材筛选复制工具（跨平台 / Electron）：按日期/类型筛选相机照片视频，一键复制到指定文件夹",
+  "author": "jeremy",
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/run-tests.js",
+    "test:smoke": "electron test/smoke.js",
+    "test:all": "node build/test-all.js",
+    "shots": "electron test/capture-layout.js",
+    "build": "node build/build.js",
+    "build:win": "node build/build.js --win",
+    "build:mac": "node build/build.js --mac",
+    "build:linux": "node build/build.js --linux",
+    "build:dir": "node build/build.js --dir",
+    "release": "node build/make.js",
+    "release:win": "node build/make.js --win",
+    "release:mac": "node build/make.js --mac",
+    "release:linux": "node build/make.js --linux",
+    "dist": "node build/build.js",
+    "dist:win": "node build/build.js --win",
+    "dist:mac": "node build/build.js --mac",
+    "dist:linux": "node build/build.js --linux",
+    "build:export": "node build.js"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0"
+  },
+  "build": {
+    "appId": "com.jeremy.dji-media-tool",
+    "productName": "DJI素材筛选复制工具",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!build/**/*",
+      "!test/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.photography"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    }
+  }
+}

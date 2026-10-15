@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<!-- index.html —— 界面骨架（文件浏览器式布局）
+     结构自上而下：相机只读提示 / 顶栏(摘要+主操作) / 结果区+预览窗格 /
+     底部状态栏；筛选条常驻列表上方；选项收进可拖动抽屉；复制选项用居中弹窗。
+     脚本按加载顺序依赖：app-config -> app-utils -> app-thumbnails -> app-preview -> renderer
+     （均为 classic script，共享 window.DJI 命名空间，顺序不能乱） -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <!-- CSP：default-src 只放行自身；img-src 放行 data:（占位 SVG）与 blob:（缩略图 Blob URL）；
+       style-src 放行 unsafe-inline（动态设置的 style 属性）。不放行任何远程源，杜绝注入外部脚本 -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline';" />
+  <title>DJI Pocket 素材筛选复制工具</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 相机只读提示（检测到相机/存储卡时出现） -->
+  <div id="cameraNotice" class="camera-notice hidden">
+    <span class="cn-icon" aria-hidden="true">🔒</span>
+    <span id="cameraNoticeText" class="cn-text"></span>
+    <button id="cameraEject" class="ghost">怎么安全拔出？</button>
+    <button id="cameraDismiss" class="ghost cn-close" title="知道了">✕</button>
+  </div>
+
+  <!-- 顶栏：标题 + 参数摘要 + 主操作 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">DJI</span>
+      <span class="title">素材筛选复制工具</span>
+    </div>
+    <div id="paramSummary" class="param-summary" title="当前扫描参数（点“显示选项”修改）">未设置素材来源</div>
+    <button id="previewToggle" class="ghost active" title="显示 / 隐藏右侧预览窗格">预览</button>
+    <button id="optionsToggle" class="ghost" aria-expanded="false">显示选项</button>
+    <button id="scanBtn" class="primary">扫描匹配文件</button>
+    <button id="copyBtn" title="点击后选择保存位置">一键复制</button>
+    <button id="cancelBtn" disabled>取消</button>
+  </header>
+
+  <!-- 结果区 + 右侧预览窗格 -->
+  <div id="panes" class="panes">
+    <main class="results">
+      <div class="results-bar">
+        <span class="label">查看</span>
+        <div class="seg" id="viewSeg">
+          <button data-view="detail" class="active">详细信息</button>
+          <button data-view="icon_large">大图标</button>
+          <button data-view="icon_medium">中图标</button>
+          <button data-view="icon_small">小图标</button>
+        </div>
+        <span class="hint hint-shrink" title="单击选中（Ctrl/Shift 多选），双击用系统默认应用打开">单击选中（Ctrl/Shift 多选），双击打开</span>
+        <span id="selInfo" class="sel-info"></span>
+      </div>
+
+      <!-- 素材实际所在文件夹（扫描后填充） -->
+      <div id="sourceFolderBar" class="source-folder hidden">
+        <span class="sf-label">素材文件夹</span>
+        <div id="sourceFolderList" class="sf-list"></div>
+      </div>
+
+      <!-- 筛选条：文件类型 + 时间 + 复制开关，常驻在列表上方，便于随时调整 -->
+      <div class="filters">
+        <span class="filter-label">文件类型</span>
+        <div class="chips">
+          <label class="chip"><input type="radio" name="fType" value="both" checked /><span>全部</span></label>
+          <label class="chip"><input type="radio" name="fType" value="photo" /><span>仅照片</span></label>
+          <label class="chip"><input type="radio" name="fType" value="video" /><span>仅视频</span></label>
+        </div>
+
+        <span class="filter-label">时间</span>
+        <div class="chips">
+          <button type="button" data-quick="today">今天</button>
+          <button type="button" data-quick="1">一天</button>
+          <button type="button" data-quick="3">三天</button>
+          <button type="button" data-quick="7">七天</button>
+          <button type="button" data-quick="clear">不限</button>
+        </div>
+
+        <div class="chips">
+          <input id="dateFrom" type="text" class="date" placeholder="YYYY-MM-DD" title="起始日期，留空=不限" />
+          <span class="chips-dash">~</span>
+          <input id="dateTo" type="text" class="date" placeholder="YYYY-MM-DD" title="结束日期，留空=不限" />
+        </div>
+
+        <div class="chips">
+          <label class="chip" title="目标文件夹里已有同名同大小的文件就跳过，重复运行不会翻倍">
+            <input type="checkbox" id="optOnlyNew" checked /><span>只复制新文件</span>
+          </label>
+          <label class="chip" title="复制后逐个比对文件大小，不一致就删除并计入失败">
+            <input type="checkbox" id="optVerify" checked /><span>复制后校验</span>
+          </label>
+        </div>
+
+        <div class="filter-tail">
+          <span id="refreshState" class="refresh-state" title="条件变化后会自动重新扫描"></span>
+          <button id="refreshBtn" type="button" class="ghost refresh-btn" title="立即重新扫描（条件变化时会自动刷新）">刷新</button>
+          <span id="filterReset" class="filter-reset" title="清空时间、恢复“全部”">重置筛选</span>
+        </div>
+      </div>
+
+      <div class="list-wrap">
+        <!-- 详细信息视图 -->
+        <table id="detailView" class="detail-view">
+          <thead>
+            <tr>
+              <th data-key="name" class="left">文件名</th>
+              <th data-key="mtime" class="left">拍摄时间</th>
+              <th data-key="kind" class="center">类型</th>
+              <th data-key="size" class="right">大小</th>
+            </tr>
+          </thead>
+          <tbody id="detailBody"></tbody>
+        </table>
+        <!-- 图标视图 -->
+        <div id="iconView" class="icon-view hidden"></div>
+        <div id="emptyTip" class="empty-tip">还没有结果。点右上角「显示选项」设置来源后扫描，这里会列出匹配到的照片 / 视频。</div>
+      </div>
+    </main>
+
+    <!-- 预览窗格：可关闭，随选中项实时更新 -->
+    <aside id="previewPane" class="preview-pane" aria-label="预览">
+      <div class="preview-head">
+        <span class="preview-title">预览</span>
+        <span id="pvBadge" class="preview-badge"></span>
+        <button id="previewClose" class="ghost preview-close" title="关闭预览窗格">✕</button>
+      </div>
+      <div class="preview-body-wrap">
+        <div id="previewEmpty" class="preview-empty">扫描后选中文件即可预览</div>
+        <div id="previewBody" class="preview-body hidden">
+          <div class="preview-thumb-box">
+            <img id="pvImage" alt="预览图" data-thumb="" data-loaded="" />
+          </div>
+          <div id="pvName" class="pv-name"></div>
+          <dl class="pv-facts">
+            <dt>类型</dt><dd id="pvKind"></dd>
+            <dt>拍摄时间</dt><dd id="pvTime"></dd>
+            <dt>大小</dt><dd id="pvSize"></dd>
+            <dt>完整路径</dt><dd id="pvPath" class="pv-path"></dd>
+          </dl>
+          <div class="pv-actions">
+            <button id="pvOpen">打开文件</button>
+            <button id="pvReveal" title="在文件管理器中定位">在文件夹中显示</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 底部：状态 + 进度 -->
+  <footer class="statusbar">
+    <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+    <div id="status" class="status">就绪。先在选项里选择素材来源，再点「扫描匹配文件」。</div>
+  </footer>
+
+  <!-- 选项抽屉：可拖动、可收起（保存位置不在这里，点“一键复制”时才选） -->
+  <aside id="settingsDrawer" class="drawer hidden" aria-hidden="true">
+    <div id="drawerHead" class="drawer-head" title="按住拖动可移动位置">
+      <span class="drawer-title">扫描选项</span>
+      <span class="drawer-grip" aria-hidden="true">⋮⋮</span>
+      <button id="drawerClose" class="ghost">收起</button>
+    </div>
+
+    <div class="drawer-body">
+      <div class="field">
+        <label class="field-label" for="srcPath">素材来源（相机 / 读卡器 / 文件夹）</label>
+        <div class="field-row">
+          <input id="srcPath" type="text" placeholder="自动检测，或手动选择相机盘符 / DCIM 文件夹" />
+          <button id="srcBrowse">浏览…</button>
+          <button id="srcAuto">自动检测</button>
+        </div>
+        <label class="check"><input type="checkbox" id="dcimOnly" checked />
+          只扫描 DCIM 文件夹（推荐，跳过相机的系统文件）</label>
+      </div>
+
+      <div class="field">
+        <span class="field-label">复制行为</span>
+        <div class="field-row wrap">
+          <button id="copyOptionsBtn">复制选项…</button>
+          <span class="hint">保存位置在点“一键复制”时选择</span>
+        </div>
+      </div>
+
+      <div class="hint">文件类型、时间范围与两个复制开关都在列表上方的筛选条里调整。</div>
+    </div>
+  </aside>
+
+  <!-- 复制选项弹窗：点“一键复制”后第一步就弹这个，确认后再选保存位置 -->
+  <div id="optionsModal" class="modal-mask hidden">
+    <div class="modal">
+      <div class="modal-title">复制选项</div>
+      <div class="modal-body">
+        <div class="opt-group">同名文件</div>
+        <label><input type="radio" name="conflict" value="skip" checked /> 跳过（目标已存在就不动它）</label>
+        <label><input type="radio" name="conflict" value="overwrite" /> 覆盖（用相机里的版本替换）</label>
+        <label><input type="radio" name="conflict" value="rename" /> 自动改名（存为 xxx (1).jpg）</label>
+
+        <div class="opt-group">写入方式</div>
+        <label class="block"><input type="checkbox" id="optByDateModal" />
+          按拍摄日期建子文件夹（如 2026-10-14/）</label>
+        <label class="block"><input type="checkbox" id="optOnlyNewModal" />
+          只复制新文件（目标里已有同名同大小的就跳过）</label>
+        <label class="block"><input type="checkbox" id="optVerifyModal" />
+          复制后校验（逐个比对大小，不一致就删除并计为失败）</label>
+        <label class="block"><input type="checkbox" id="optOpenAfterModal" checked />
+          复制完成后打开目标文件夹</label>
+      </div>
+      <div class="modal-footer">
+        <button id="optCancel">取消</button>
+        <button id="optOk" class="primary">下一步：选择保存位置</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app-config.js"></script>
+  <script src="app-utils.js"></script>
+  <script src="app-thumbnails.js"></script>
+  <script src="app-preview.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
